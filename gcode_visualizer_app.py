@@ -1,32 +1,44 @@
 import tkinter as tk
+from tkinter import ttk # Import ttk for Notebook
 from tkinter import filedialog, messagebox
 import math
 
-# Attempt to import the parser, handle potential errors
+# Attempt to import the parser and modifier
 try:
     from gcode_parser import parse_gcode
-except ImportError:
-    messagebox.showerror("Import Error", "Could not find gcode_parser.py. Make sure it's in the same directory.")
+    from gcode_modifier import modify_gcode # Import the main modification function
+except ImportError as e:
+    # More specific error message
+    missing_module = str(e).split("'")[-2] # Attempt to get module name
+    messagebox.showerror("Import Error", f"Could not find {missing_module}.py. Make sure it's in the same directory.")
     exit()
 except Exception as e:
-    messagebox.showerror("Import Error", f"An error occurred importing gcode_parser: {e}")
+    messagebox.showerror("Import Error", f"An error occurred during import: {e}")
     exit()
 
 class GCodeVisualizerApp:
     DEFAULT_ANIMATION_S = 5.0
-    DEFAULT_LINE_WIDTH_MM = 10.0 # Changed default for consistency
+    DEFAULT_LINE_WIDTH_MM = 10.0
 
     def __init__(self, master):
         self.master = master
-        master.title("G-Code 2D Visualizer")
-        master.geometry("800x650")
+        master.title("G-Code 2D Visualizer & Modifier") # Updated title
+        master.geometry("800x650") # Keep geometry
 
-        self.canvas_width = 780
-        self.canvas_height = 550
-        self.padding = 20
+        # --- Create Notebook (Tabs) ---
+        self.notebook = ttk.Notebook(master)
+        self.notebook.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
 
-        # --- GUI Elements ---
-        self.top_frame = tk.Frame(master)
+        # --- Tab 1: Visualization ---
+        self.vis_tab = tk.Frame(self.notebook)
+        self.notebook.add(self.vis_tab, text='Visualization')
+
+        # --- Tab 2: G-code Modification ---
+        self.mod_tab = tk.Frame(self.notebook)
+        self.notebook.add(self.mod_tab, text='G-code Modification')
+
+        # --- GUI Elements for Visualization Tab ---
+        self.top_frame = tk.Frame(self.vis_tab) # Place in vis_tab
         self.top_frame.pack(pady=5, fill=tk.X)
 
         self.load_button = tk.Button(self.top_frame, text="Load G-Code File", command=self.load_file)
@@ -37,24 +49,68 @@ class GCodeVisualizerApp:
         self.line_width_label.pack(side=tk.LEFT, padx=(10, 2))
         self.line_width_entry = tk.Entry(self.top_frame, width=5)
         self.line_width_entry.pack(side=tk.LEFT, padx=(0, 5))
-        self.line_width_entry.insert(0, str(self.DEFAULT_LINE_WIDTH_MM)) # Default value
+        self.line_width_entry.insert(0, str(self.DEFAULT_LINE_WIDTH_MM))
 
         # Animation Length Input
         self.anim_label = tk.Label(self.top_frame, text="Animation (s):")
         self.anim_label.pack(side=tk.LEFT, padx=(10, 2))
         self.anim_entry = tk.Entry(self.top_frame, width=5)
         self.anim_entry.pack(side=tk.LEFT, padx=(0, 5))
-        self.anim_entry.insert(0, str(self.DEFAULT_ANIMATION_S)) # Default value (0 for instant)
+        self.anim_entry.insert(0, str(self.DEFAULT_ANIMATION_S))
 
         self.status_label = tk.Label(self.top_frame, text="Select a G-code file to visualize.")
         self.status_label.pack(side=tk.RIGHT, padx=5)
 
+        # Canvas (place in vis_tab)
+        self.canvas_width = 780 # Keep original calculation basis if needed elsewhere
+        self.canvas_height = 550
+        self.padding = 20
+        self.canvas = tk.Canvas(self.vis_tab, bg="white", relief=tk.SUNKEN, borderwidth=1) # No fixed size, let it expand
+        self.canvas.pack(pady=10, padx=10, fill=tk.BOTH, expand=True) # Fill available space in tab
 
-        self.canvas = tk.Canvas(master, width=self.canvas_width, height=self.canvas_height, bg="white", relief=tk.SUNKEN, borderwidth=1)
-        self.canvas.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
+        # --- GUI Elements for Modification Tab ---
+        self.mod_content_frame = tk.Frame(self.mod_tab, padx=10, pady=10)
+        self.mod_content_frame.pack(fill=tk.BOTH, expand=True) # Allow frame to expand
+
+        # --- Top section for controls ---
+        self.mod_controls_frame = tk.Frame(self.mod_content_frame)
+        self.mod_controls_frame.pack(anchor=tk.NW) # Keep controls at the top-left
+
+        self.strategy_label = tk.Label(self.mod_controls_frame, text="Select Path Optimization Strategy:")
+        self.strategy_label.pack(anchor=tk.W, pady=(0, 5))
+
+        self.strategy_var = tk.StringVar(master)
+        self.strategy_var.set("Shortest Path")
+
+        self.radio_shortest = tk.Radiobutton(self.mod_controls_frame, text="Shortest Path", variable=self.strategy_var, value="Shortest Path")
+        self.radio_shortest.pack(anchor=tk.W)
+
+        self.radio_vertical = tk.Radiobutton(self.mod_controls_frame, text="Vertical Lines (Left-to-Right)", variable=self.strategy_var, value="Vertical")
+        self.radio_vertical.pack(anchor=tk.W)
+
+        self.radio_horizontal = tk.Radiobutton(self.mod_controls_frame, text="Horizontal Lines (Top-to-Bottom)", variable=self.strategy_var, value="Horizontal")
+        self.radio_horizontal.pack(anchor=tk.W)
+
+        # Connect the button command
+        self.modify_button = tk.Button(self.mod_controls_frame, text="Modify G-code", command=self.modify_gcode_path)
+        self.modify_button.pack(anchor=tk.W, pady=(15, 10)) # Add some bottom padding
+
+        # --- Output Text Area ---
+        self.mod_output_label = tk.Label(self.mod_content_frame, text="Modified G-code:")
+        self.mod_output_label.pack(anchor=tk.W, pady=(10, 2))
+
+        self.mod_output_text = tk.Text(self.mod_content_frame, height=15, wrap=tk.WORD, relief=tk.SUNKEN, borderwidth=1)
+        self.mod_output_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5) # Fill remaining space
+
+        # Add scrollbar for the text area
+        self.mod_scrollbar = tk.Scrollbar(self.mod_output_text, command=self.mod_output_text.yview)
+        self.mod_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.mod_output_text.config(yscrollcommand=self.mod_scrollbar.set)
+
 
         # --- Visualization State ---
         self.parsed_data = None
+        self.original_filepath = None # Store the original filepath
         self.bounds = None # (min_x, min_y, max_x, max_y)
         self.scale = 1.0
         self.offset_x = 0.0
@@ -62,12 +118,12 @@ class GCodeVisualizerApp:
 
         # --- Animation State ---
         self.animation_job_id = None
-        self.current_anim_x = 0.0 # Logical X for animation tracking
-        self.current_anim_y = 0.0 # Logical Y for animation tracking
-        self.last_anim_canvas_x = None # Last drawn canvas X
-        self.last_anim_canvas_y = None # Last drawn canvas Y
-        self.current_anim_z = None # Logical Z for animation tracking
-        self.is_pen_down = False   # Pen state for animation
+        self.current_anim_x = 0.0
+        self.current_anim_y = 0.0
+        self.last_anim_canvas_x = None
+        self.last_anim_canvas_y = None
+        self.current_anim_z = None
+        self.is_pen_down = False
     
     def load_file(self):
         """Opens a file dialog, attempts parsing, and starts drawing/animation."""
@@ -86,10 +142,13 @@ class GCodeVisualizerApp:
             self.status_label.config(text="File selection cancelled.")
             return
 
+        self.original_filepath = filepath # Store the path
         self.status_label.config(text=f"Loading: {filepath.split('/')[-1]}...")
         self.master.update_idletasks()
 
         try:
+            # Clear previous modified output when loading a new file
+            self.mod_output_text.delete('1.0', tk.END)
             self.parsed_data = parse_gcode(filepath)
             if not self.parsed_data:
                 self.status_label.config(text=f"File loaded but contains no plottable data: {filepath.split('/')[-1]}")
@@ -112,13 +171,52 @@ class GCodeVisualizerApp:
             self.clear_canvas()
             self.parsed_data = None
 
+    # ... (rest of the methods: load_file, calculate_bounds_and_scale, etc.) ...
+
+    # --- Need to update transform_coords and potentially others to use canvas dimensions dynamically ---
+    # Example adjustment (might need more depending on usage):
+    def transform_coords(self, x, y):
+        """Applies scaling and offset to G-code coordinates for canvas drawing."""
+        # Get current canvas dimensions
+        current_canvas_width = self.canvas.winfo_width()
+        current_canvas_height = self.canvas.winfo_height()
+
+        if current_canvas_width <= 1 or current_canvas_height <= 1: # Canvas not yet drawn or too small
+             current_canvas_width = self.canvas_width # Fallback to initial estimates
+             current_canvas_height = self.canvas_height
+
+        if self.bounds is None or self.scale <= 1e-9:
+            # Center if no bounds/scale
+            return current_canvas_width / 2, current_canvas_height / 2
+
+        # Recalculate available space based on current dimensions
+        available_width = current_canvas_width - 2 * self.padding
+        available_height = current_canvas_height - 2 * self.padding
+
+        # --- Recalculate scale based on current canvas size ---
+        # This should ideally happen when the canvas size changes or data loads,
+        # but for simplicity, we might recalculate it here if needed,
+        # or ensure calculate_bounds_and_scale uses dynamic dimensions.
+        # For now, assume self.scale was calculated correctly based on initial load.
+        # If resizing is needed, a more robust approach involving binding to <Configure> is required.
+
+        canvas_x = (x - self.bounds[0]) * self.scale + self.padding
+        # Invert Y axis for canvas coordinates
+        canvas_y = available_height - (y - self.bounds[1]) * self.scale + self.padding # Use available_height
+
+        # Clamp coordinates to be within the visible canvas area? Optional.
+        # canvas_x = max(self.padding, min(canvas_x, current_canvas_width - self.padding))
+        # canvas_y = max(self.padding, min(canvas_y, current_canvas_height - self.padding))
+
+        return canvas_x, canvas_y
+
+    # --- Adjust calculate_bounds_and_scale to use dynamic canvas size ---
     def calculate_bounds_and_scale(self):
         """Calculates the bounding box of the G-code path and the scaling factor."""
         if not self.parsed_data:
             self.bounds = None
             self.scale = 1.0
-            self.offset_x = self.canvas_width / 2
-            self.offset_y = self.canvas_height / 2
+            # Offset calculation is implicit in transform_coords
             return
 
         min_x, min_y = float('inf'), float('inf')
@@ -146,19 +244,29 @@ class GCodeVisualizerApp:
         if not has_coords:
              self.bounds = (0, 0, 0, 0)
              self.scale = 1.0
-             self.offset_x = self.canvas_width / 2
-             self.offset_y = self.canvas_height / 2
              return
 
         self.bounds = (min_x, min_y, max_x, max_y)
 
+        # --- Use current canvas dimensions for scaling ---
+        # Ensure canvas is updated to get actual size
+        self.master.update_idletasks()
+        current_canvas_width = self.canvas.winfo_width()
+        current_canvas_height = self.canvas.winfo_height()
+
+        if current_canvas_width <= 1 or current_canvas_height <= 1: # Fallback if not drawn
+             current_canvas_width = self.canvas_width
+             current_canvas_height = self.canvas_height
+        # ------------------------------------------------
+
         data_width = max_x - min_x
         data_height = max_y - min_y
-        available_width = self.canvas_width - 2 * self.padding
-        available_height = self.canvas_height - 2 * self.padding
+        available_width = current_canvas_width - 2 * self.padding
+        available_height = current_canvas_height - 2 * self.padding
 
+        # Handle zero dimensions safely
         if data_width <= 1e-6 and data_height <= 1e-6:
-             self.scale = 1.0
+             self.scale = 1.0 # Or some default scale?
         elif data_width <= 1e-6:
              self.scale = available_height / data_height if data_height > 1e-6 else 1.0
         elif data_height <= 1e-6:
@@ -168,20 +276,7 @@ class GCodeVisualizerApp:
              scale_y = available_height / data_height
              self.scale = min(scale_x, scale_y)
 
-        self.scale = max(1e-6, self.scale)
-
-        # Offset calculation remains the same, handled by transform_coords
-        # self.offset_x = ... (calculated within transform_coords effectively)
-        # self.offset_y = ...
-
-    def transform_coords(self, x, y):
-        """Applies scaling and offset to G-code coordinates for canvas drawing."""
-        if self.bounds is None or self.scale <= 1e-9:
-            return self.canvas_width / 2, self.canvas_height / 2
-
-        canvas_x = (x - self.bounds[0]) * self.scale + self.padding
-        canvas_y = self.canvas_height - ((y - self.bounds[1]) * self.scale + self.padding)
-        return canvas_x, canvas_y
+        self.scale = max(1e-6, self.scale) # Prevent zero or negative scale
 
     def get_line_width_pixels(self):
         """Gets and validates line width from entry, returns pixel width."""
@@ -432,15 +527,59 @@ class GCodeVisualizerApp:
                     # --- End Always Update Position ---
                 # else: No XY movement, Z might have changed (handled above)
 
-    def clear_canvas(self):
-        """Clears all items from the canvas."""
-        # Also cancel animation if clearing manually or during load
-        if self.animation_job_id:
-            self.master.after_cancel(self.animation_job_id)
-            self.animation_job_id = None
-            # Don't change status label here, load_file or draw_gcode will set it
-        self.canvas.delete("all")
+    # --- Add the new method ---
+    def modify_gcode_path(self):
+        """Handles the G-code modification process based on selected strategy."""
+        selected_strategy = self.strategy_var.get()
+        self.mod_output_text.delete('1.0', tk.END) # Clear previous output
 
+        if not self.parsed_data:
+            messagebox.showerror("Error", "No G-code data loaded. Please load a file first.")
+            self.mod_output_text.insert(tk.END, "Error: Load G-code file first.")
+            return
+
+        # No need to check original_filepath here, modify_gcode doesn't need it directly
+        # if not self.original_filepath:
+        #      messagebox.showerror("Error", "Original file path not found. Please reload the file.")
+        #      self.mod_output_text.insert(tk.END, "Error: Original file path missing.")
+        #      return
+
+        self.mod_output_text.insert(tk.END, f"Starting modification with strategy: {selected_strategy}\n")
+        # self.mod_output_text.insert(tk.END, f"Original file: {self.original_filepath}\n") # Optional info
+        self.mod_output_text.insert(tk.END, f"Processing {len(self.parsed_data)} original commands...\n")
+        self.master.update_idletasks() # Show status update
+
+        try:
+            # --- Call the actual modification logic ---
+            modified_gcode_result = modify_gcode(self.parsed_data, selected_strategy)
+            # --- End modification logic call ---
+
+            self.mod_output_text.insert(tk.END, "\n--- Generated G-code ---\n")
+            self.mod_output_text.insert(tk.END, modified_gcode_result) # Display the result
+
+            # Show info message, indicating placeholder status if applicable
+            if "placeholder" in modified_gcode_result.lower() or "error" in modified_gcode_result.lower():
+                 messagebox.showwarning("Modification Result", f"Modification process finished for strategy: {selected_strategy}.\nCheck output area for details (may contain placeholders or errors).")
+            else:
+                 messagebox.showinfo("Modification Complete", f"Modification process complete for strategy: {selected_strategy}.\nGenerated G-code is shown in the text area.")
+
+
+        except Exception as e:
+            # This catches errors within modify_gcode_path itself,
+            # modify_gcode has its own internal try/except
+            messagebox.showerror("Modification Error", f"An unexpected error occurred in the GUI application during modification:\n{e}")
+            self.mod_output_text.insert(tk.END, f"\nGUI Error during modification: {e}")
+
+
+    # ... (rest of the methods: transform_coords, calculate_bounds_and_scale, etc.) ...
+
+    def clear_canvas(self):
+        """Clears the visualization canvas."""
+        self.canvas.delete("gcode_path") # Use the tag to delete only G-code lines
+        # Optionally clear other elements if needed
+        # self.canvas.delete("all") # To clear everything
+
+# ... (main execution block) ...
 if __name__ == "__main__":
     root = tk.Tk()
     app = GCodeVisualizerApp(root)
