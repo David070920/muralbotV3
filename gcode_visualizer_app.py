@@ -93,7 +93,11 @@ class GCodeVisualizerApp:
 
         # Connect the button command
         self.modify_button = tk.Button(self.mod_controls_frame, text="Modify G-code", command=self.modify_gcode_path)
-        self.modify_button.pack(anchor=tk.W, pady=(15, 10)) # Add some bottom padding
+        self.modify_button.pack(anchor=tk.W, pady=(15, 5)) # Adjust padding
+
+        # --- Add Download Button ---
+        self.download_button = tk.Button(self.mod_controls_frame, text="Download Modified G-code", command=self.save_modified_gcode)
+        self.download_button.pack(anchor=tk.W, pady=(5, 10)) # Add padding
 
         # --- Output Text Area ---
         self.mod_output_label = tk.Label(self.mod_content_frame, text="Modified G-code:")
@@ -515,7 +519,7 @@ class GCodeVisualizerApp:
                                 target_canvas_x, target_canvas_y,
                                 fill=move_color,
                                 width=line_width_pixels,
-                                tags="gcode_path" # Keep tag
+                                tags="gcode_path"
                             )
                     # --- End Conditional Drawing ---
 
@@ -527,59 +531,82 @@ class GCodeVisualizerApp:
                     # --- End Always Update Position ---
                 # else: No XY movement, Z might have changed (handled above)
 
-    # --- Add the new method ---
+    # --- G-code Modification Logic ---
     def modify_gcode_path(self):
         """Handles the G-code modification process based on selected strategy."""
-        selected_strategy = self.strategy_var.get()
-        self.mod_output_text.delete('1.0', tk.END) # Clear previous output
-
-        if not self.parsed_data:
-            messagebox.showerror("Error", "No G-code data loaded. Please load a file first.")
-            self.mod_output_text.insert(tk.END, "Error: Load G-code file first.")
+        if not self.parsed_data or not self.original_filepath:
+            messagebox.showwarning("No Data", "Please load a G-code file first.")
             return
 
-        # No need to check original_filepath here, modify_gcode doesn't need it directly
-        # if not self.original_filepath:
-        #      messagebox.showerror("Error", "Original file path not found. Please reload the file.")
-        #      self.mod_output_text.insert(tk.END, "Error: Original file path missing.")
-        #      return
-
-        self.mod_output_text.insert(tk.END, f"Starting modification with strategy: {selected_strategy}\n")
-        # self.mod_output_text.insert(tk.END, f"Original file: {self.original_filepath}\n") # Optional info
-        self.mod_output_text.insert(tk.END, f"Processing {len(self.parsed_data)} original commands...\n")
-        self.master.update_idletasks() # Show status update
+        strategy = self.strategy_var.get()
+        self.status_label.config(text=f"Modifying G-code using '{strategy}' strategy...")
+        self.master.update_idletasks()
 
         try:
-            # --- Call the actual modification logic ---
-            modified_gcode_result = modify_gcode(self.parsed_data, selected_strategy)
-            # --- End modification logic call ---
+            # Pass the parsed data to the modifier
+            modified_gcode_string = modify_gcode(self.parsed_data, strategy) # Pass parsed_data
 
-            self.mod_output_text.insert(tk.END, "\n--- Generated G-code ---\n")
-            self.mod_output_text.insert(tk.END, modified_gcode_result) # Display the result
+            # Display the modified G-code in the text area
+            self.mod_output_text.delete('1.0', tk.END) # Clear previous output
+            self.mod_output_text.insert(tk.END, modified_gcode_string) # Insert the returned string
 
-            # Show info message, indicating placeholder status if applicable
-            if "placeholder" in modified_gcode_result.lower() or "error" in modified_gcode_result.lower():
-                 messagebox.showwarning("Modification Result", f"Modification process finished for strategy: {selected_strategy}.\nCheck output area for details (may contain placeholders or errors).")
-            else:
-                 messagebox.showinfo("Modification Complete", f"Modification process complete for strategy: {selected_strategy}.\nGenerated G-code is shown in the text area.")
+            self.status_label.config(text=f"G-code modification complete using '{strategy}'.")
+            messagebox.showinfo("Success", f"G-code successfully modified using the '{strategy}' strategy.\nModified code is shown below.")
 
-
+        except FileNotFoundError:
+             messagebox.showerror("Error", f"Original file not found: {self.original_filepath}")
+             self.status_label.config(text="Error: Original file not found during modification.")
         except Exception as e:
-            # This catches errors within modify_gcode_path itself,
-            # modify_gcode has its own internal try/except
-            messagebox.showerror("Modification Error", f"An unexpected error occurred in the GUI application during modification:\n{e}")
-            self.mod_output_text.insert(tk.END, f"\nGUI Error during modification: {e}")
+            messagebox.showerror("Modification Error", f"An error occurred during G-code modification:\n{e}")
+            self.status_label.config(text=f"Error during modification: {e}")
 
+    def save_modified_gcode(self):
+        """Saves the content of the modification output text area to a file."""
+        modified_content = self.mod_output_text.get('1.0', tk.END).strip()
 
-    # ... (rest of the methods: transform_coords, calculate_bounds_and_scale, etc.) ...
+        if not modified_content:
+            messagebox.showwarning("No Content", "There is no modified G-code to save.")
+            return
 
+        # Suggest a filename based on the original
+        suggested_filename = "modified_output.gcode" # Default
+        if self.original_filepath:
+            try:
+                base = self.original_filepath.rsplit('.', 1)[0]
+                ext = self.original_filepath.rsplit('.', 1)[1] if '.' in self.original_filepath else 'gcode'
+                suggested_filename = f"{base}_modified.{ext}"
+            except Exception: # Handle potential index errors if filename is weird
+                pass # Keep the default
+
+        filepath = filedialog.asksaveasfilename(
+            title="Save Modified G-Code As...",
+            initialfile=suggested_filename,
+            defaultextension=".gcode",
+            filetypes=(("G-Code Files", "*.gcode *.nc *.ngc *.tap *.txt"), ("All Files", "*.*"))
+        )
+
+        if not filepath:
+            # User cancelled
+            self.status_label.config(text="Save cancelled.")
+            return
+
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(modified_content + "\n") # Add newline at the end
+            self.status_label.config(text=f"Modified G-code saved to: {filepath.split('/')[-1]}")
+            messagebox.showinfo("Save Successful", f"Modified G-code saved successfully to:\n{filepath}")
+        except Exception as e:
+            messagebox.showerror("Save Error", f"Failed to save the file:\n{e}")
+            self.status_label.config(text=f"Error saving file: {e}")
+
+    # --- Canvas Clearing ---
     def clear_canvas(self):
         """Clears the visualization canvas."""
         self.canvas.delete("gcode_path") # Use the tag to delete only G-code lines
         # Optionally clear other elements if needed
         # self.canvas.delete("all") # To clear everything
 
-# ... (main execution block) ...
+# --- Main Execution ---
 if __name__ == "__main__":
     root = tk.Tk()
     app = GCodeVisualizerApp(root)
