@@ -1,0 +1,7 @@
+I want to create an app for a poligraph mural painting robot which will be suspended from the top left and top right corners and bottom middle of the working area and moved using stepper motors. The purpose of this app would be to generate an instruction file for the 3 motors to follow. I want to upload an image to the app and be able to generate gcode for each color individually or for the whole picture. I also want to have a spray dot mode and a continous spray mode in order to be able to paint multiple styles of murals. In order for the robot not to be affected by acceleration, I want it to make a circle before each sharp turn, where the radius and the turn angle threshold will be configurable by the user.
+
+Usefull links:
+https://github.com/john4242/grbl-polargraph
+https://juerglehni.com/works/hektor
+https://github.com/cnc-club/gcodetools/blob/master/stable/gcodetools_graffiti.inx
+https://cnc-club.ru/forum/viewtopic.php?f=3&t=91
